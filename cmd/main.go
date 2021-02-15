@@ -28,4 +28,16 @@ func main() {
 	}
 
 	fmt.Println(m.TableName)
+	id, e := m.Insert(Student{
+		Name: sql.NullString{
+			String: "shit mother fucker",
+			Valid:  true,
+		},
+	})
+	if e != nil {
+		log.Println(e)
+		return
+	}
+
+	fmt.Println("id=", id.(uint32))
 }

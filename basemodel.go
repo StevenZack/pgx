@@ -65,9 +65,13 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		field := t.Field(i)
 		if i == 0 {
 			switch field.Type.Kind() {
-			case reflect.Uint, reflect.Uint64, reflect.Uint32, reflect.Uint16:
+			case reflect.Uint,
+				reflect.Uint64,
+				reflect.Uint32,
+				reflect.Uint16,
+				reflect.String:
 			default:
-				return nil, false, errors.New("The first field " + field.Name + "'s type must be one of uint,uint32,uint64,uint16")
+				return nil, false, errors.New("The first field " + field.Name + "'s type must be one of uint,uint32,uint64,uint16,string")
 			}
 		}
 
@@ -146,8 +150,13 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 }
 
 func (b *BaseModel) createTable() error {
+	_, e := b.Pool.Exec(b.GetCreateTableSQL())
+	return e
+}
+
+func (b *BaseModel) GetCreateTableSQL() string {
 	builder := new(strings.Builder)
-	builder.WriteString(`create table ` + b.TableName + ` (`)
+	builder.WriteString(`create table public.` + b.TableName + ` (`)
 	for i, dbTag := range b.dbTags {
 		builder.WriteString(dbTag + " ")
 		builder.WriteString(b.dbTypes[i])
@@ -159,8 +168,71 @@ func (b *BaseModel) createTable() error {
 		}
 	}
 	builder.WriteString(`)`)
+	return builder.String()
+}
 
-	fmt.Println("sql=", builder.String())
-	_, e := b.Pool.Exec(builder.String())
-	return e
+func (b *BaseModel) GetInsertSQL() ([]int, string) {
+	builder := new(strings.Builder)
+	builder.WriteString(`insert into public.` + b.TableName + ` (`)
+
+	values := new(strings.Builder)
+	values.WriteString("values (")
+
+	argsIndex := []int{}
+
+	for i, dbTag := range b.dbTags {
+		dbType := b.dbTypes[i]
+		if strings.Contains(dbType, "serial") {
+			continue
+		}
+
+		argsIndex = append(argsIndex, i)
+
+		builder.WriteString(dbTag)
+		values.WriteString("$" + strconv.Itoa(len(argsIndex)))
+
+		if i < len(b.dbTags)-1 {
+			builder.WriteString(",")
+			values.WriteString(",")
+		}
+
+	}
+
+	builder.WriteString(")")
+	values.WriteString(")")
+
+	builder.WriteString(values.String())
+
+	//returning primary key
+	builder.WriteString("returning " + b.dbTags[0])
+
+	return argsIndex, builder.String()
+}
+
+// public
+func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
+	//validate
+	value := reflect.ValueOf(v)
+	t := value.Type()
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+		value = value.Elem()
+	}
+	if t.Name() != b.Type.Name() {
+		return nil, errors.New("Wrong insert type:" + t.Name() + " for table " + b.TableName)
+	}
+
+	argsIndex, query := b.GetInsertSQL()
+	args := []interface{}{}
+	for _, i := range argsIndex {
+		args = append(args, value.Field(i).Interface())
+	}
+
+	id := reflect.New(b.Type.Field(0).Type)
+	e := b.Pool.QueryRow(query, args...).Scan(id.Interface())
+	if e != nil {
+		return nil, e
+	}
+
+	return id.Elem().Interface(), nil
 }
