@@ -160,6 +160,7 @@ func (b *BaseModel) GetCreateTableSQL() string {
 	return builder.String()
 }
 
+// GetInsertSQL returns insert SQL without returning id
 func (b *BaseModel) GetInsertSQL() ([]int, string) {
 	builder := new(strings.Builder)
 	builder.WriteString(`insert into public.` + b.TableName + ` (`)
@@ -195,12 +196,29 @@ func (b *BaseModel) GetInsertSQL() ([]int, string) {
 	return argsIndex, builder.String()
 }
 
+// GetInsertReturningSQL returns insert SQL with returning id
 func (b *BaseModel) GetInsertReturningSQL() ([]int, string) {
 	argsIndex, query := b.GetInsertSQL()
 	return argsIndex, query + " returning " + b.dbTags[0]
 }
 
-// public
+// GetSelectSQL returns fieldIndexes, and select SQL
+func (b *BaseModel) GetSelectSQL() ([]int, string) {
+	builder := new(strings.Builder)
+	builder.WriteString(`select `)
+	fieldIndexes := []int{}
+	for i, dbTag := range b.dbTags {
+		builder.WriteString(dbTag)
+		fieldIndexes = append(fieldIndexes, i)
+		if i < len(b.dbTags)-1 {
+			builder.WriteString(",")
+		}
+	}
+	builder.WriteString(" from " + b.TableName)
+	return fieldIndexes, builder.String()
+}
+
+// Insert inserts v (*struct or struct type)
 func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
 	//validate
 	value := reflect.ValueOf(v)
@@ -230,6 +248,7 @@ func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
 	return id.Elem().Interface(), nil
 }
 
+// InsertAll inserts vs ([]*struct or []struct type)
 func (b *BaseModel) InsertAll(vs interface{}) error {
 	//validate
 	sliceValue := reflect.ValueOf(vs)
@@ -274,4 +293,171 @@ func (b *BaseModel) InsertAll(vs interface{}) error {
 	}
 
 	return nil
+}
+
+// Find finds a document (*struct type) by id
+func (b *BaseModel) Find(id interface{}) (interface{}, error) {
+	//scan
+	v := reflect.New(b.Type)
+	fieldIndexes, query := b.GetSelectSQL()
+	fieldArgs := []interface{}{}
+	for _, i := range fieldIndexes {
+		fieldArgs = append(fieldArgs, v.Elem().Field(i).Addr().Interface())
+	}
+
+	query = query + ` where ` + b.dbTags[0] + `=$1`
+	e := b.Pool.QueryRow(query, id).Scan(fieldArgs...)
+	if e != nil {
+		return nil, fmt.Errorf("%w:%s", e, query)
+	}
+	return v.Interface(), nil
+}
+
+// FindWhere finds a document (*struct type) that matches 'where' condition
+func (b *BaseModel) FindWhere(where string, args ...interface{}) (interface{}, error) {
+	//where
+	where = toWhere(where)
+
+	//scan
+	v := reflect.New(b.Type)
+	fieldIndexes, query := b.GetSelectSQL()
+	query = query + where
+	fieldArgs := []interface{}{}
+	for _, i := range fieldIndexes {
+		fieldArgs = append(fieldArgs, v.Elem().Field(i).Addr().Interface())
+	}
+	e := b.Pool.QueryRow(query, args...).Scan(fieldArgs...)
+	if e != nil {
+		return nil, fmt.Errorf("%w:%s", e, query)
+	}
+	return v.Interface(), nil
+}
+
+// QueryWhere queries documents ([]*struct type) that matches 'where' condition
+func (b *BaseModel) QueryWhere(where string, args ...interface{}) (interface{}, error) {
+	where = toWhere(where)
+
+	fieldIndexes, query := b.GetSelectSQL()
+
+	//query
+	query = query + where
+	rows, e := b.Pool.Query(query, args...)
+	if e != nil {
+		return nil, fmt.Errorf("%w:%s", e, query)
+	}
+
+	vs := reflect.New(reflect.SliceOf(reflect.PtrTo(b.Type)))
+	for rows.Next() {
+		v := reflect.New(b.Type)
+		fieldArgs := []interface{}{}
+		for _, i := range fieldIndexes {
+			fieldArgs = append(fieldArgs, v.Elem().Field(i).Addr().Interface())
+		}
+		e = rows.Scan(fieldArgs...)
+		if e != nil {
+			break
+		}
+		vs = reflect.Append(vs, v)
+	}
+
+	// check err
+	if closeErr := rows.Close(); closeErr != nil {
+		return nil, fmt.Errorf("rows.Close() err:%w", closeErr)
+	}
+	if e != nil {
+		return nil, e
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+
+	return vs.Elem().Interface(), nil
+}
+
+func (b *BaseModel) Exists(id interface{}) (bool, error) {
+	//scan
+	num := 0
+	query := `select 1 from ` + b.TableName + ` where ` + b.dbTags[0] + `=$1 limit 1`
+	e := b.Pool.QueryRow(query, id).Scan(&num)
+	if e != nil {
+		if e == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w:%s", e, query)
+	}
+	return num > 0, nil
+}
+
+func (b *BaseModel) ExistsWhere(where string, args ...interface{}) (bool, error) {
+	//where
+	where = toWhere(where)
+
+	//scan
+	num := 0
+	query := `select 1 from ` + b.TableName + where + ` limit 1`
+	e := b.Pool.QueryRow(query, args...).Scan(&num)
+	if e != nil {
+		if e == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("%w:%s", e, query)
+	}
+	return num > 0, nil
+}
+
+func (b *BaseModel) CountWhere(where string, args ...interface{}) (int64, error) {
+	where = toWhere(where)
+
+	//scan
+	var num int64
+	query := `select count(*) as count from ` + b.TableName + where
+	e := b.Pool.QueryRow(query, args...).Scan(&num)
+	if e != nil {
+		return 0, fmt.Errorf("%w:%s", e, query)
+	}
+	return num, nil
+}
+
+func (b *BaseModel) UpdateSet(sets string, where string, args ...interface{}) (int64, error) {
+	where = toWhere(where)
+
+	query := `update ` + b.TableName + ` set ` + sets + where
+	result, e := b.Pool.Exec(query, args...)
+	if e != nil {
+		return 0, fmt.Errorf("%w:%s", e, query)
+	}
+	return result.RowsAffected()
+}
+
+func (b *BaseModel) Clear() error {
+	query := `truncate table ` + b.TableName
+	_, e := b.Pool.Exec(query)
+	if e != nil {
+		return fmt.Errorf("%w:%s", e, query)
+	}
+	return nil
+}
+
+func (b *BaseModel) Truncate() error {
+	return b.Clear()
+}
+
+func (b *BaseModel) Delete(id interface{}) (int64, error) {
+	query := `delete from ` + b.TableName + ` where ` + b.dbTags[0] + `=$1`
+	result, e := b.Pool.Exec(query, id)
+	if e != nil {
+		return 0, fmt.Errorf("%w:%s", e, query)
+	}
+	return result.RowsAffected()
+}
+
+func (b *BaseModel) DeleteWhere(where string, args ...interface{}) (int64, error) {
+	where = toWhere(where)
+
+	query := `delete from ` + b.TableName + where
+	result, e := b.Pool.Exec(query, args...)
+	if e != nil {
+		return 0, fmt.Errorf("%w:%s", e, query)
+	}
+	return result.RowsAffected()
 }
