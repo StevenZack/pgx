@@ -124,22 +124,11 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		for i, db := range model.dbTags {
 			column := columns[i]
 			if db != column.ColumnName {
-				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + " doesn't match remote column:" + column.ColumnName)
+				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + " name doesn't match remote column:" + column.ColumnName)
 			}
 
-			dbType := model.dbTypes[i]
-			dbType = strToolkit.SubBefore(dbType, " ", dbType)
-			switch dbType {
-			case "serial":
-				dbType = "integer"
-			case "smallserial":
-				dbType = "smallint"
-			case "bigserial":
-				dbType = "bigint"
-			}
-
+			dbType := toPgPrimitiveType(model.dbTypes[i])
 			remoteType := strToolkit.SubBefore(column.DataType, " ", column.DataType)
-
 			if dbType != remoteType {
 				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + "'s type '" + dbType + "' doesn't match remote type:" + remoteType)
 			}
@@ -203,10 +192,12 @@ func (b *BaseModel) GetInsertSQL() ([]int, string) {
 
 	builder.WriteString(values.String())
 
-	//returning primary key
-	builder.WriteString("returning " + b.dbTags[0])
-
 	return argsIndex, builder.String()
+}
+
+func (b *BaseModel) GetInsertReturningSQL() ([]int, string) {
+	argsIndex, query := b.GetInsertSQL()
+	return argsIndex, query + " returning " + b.dbTags[0]
 }
 
 // public
@@ -218,16 +209,18 @@ func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
 		t = t.Elem()
 		value = value.Elem()
 	}
-	if t.Name() != b.Type.Name() {
-		return nil, errors.New("Wrong insert type:" + t.Name() + " for table " + b.TableName)
+	if t.String() != b.Type.String() {
+		return nil, errors.New("Wrong insert type:" + t.String() + " for table " + b.TableName)
 	}
 
-	argsIndex, query := b.GetInsertSQL()
+	//args
+	argsIndex, query := b.GetInsertReturningSQL()
 	args := []interface{}{}
 	for _, i := range argsIndex {
 		args = append(args, value.Field(i).Interface())
 	}
 
+	//exec
 	id := reflect.New(b.Type.Field(0).Type)
 	e := b.Pool.QueryRow(query, args...).Scan(id.Interface())
 	if e != nil {
@@ -235,4 +228,50 @@ func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
 	}
 
 	return id.Elem().Interface(), nil
+}
+
+func (b *BaseModel) InsertAll(vs interface{}) error {
+	//validate
+	sliceValue := reflect.ValueOf(vs)
+	t := sliceValue.Type()
+	if t.Kind() != reflect.Slice {
+		return errors.New("Insert value is not an slice type:" + t.String())
+	}
+	t = t.Elem()
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.String() != b.Type.String() {
+		return errors.New("Wrong insert type:" + t.String() + " for table " + b.TableName)
+	}
+
+	//prepare
+	argsIndex, query := b.GetInsertSQL()
+
+	stmt, e := b.Pool.Prepare(query)
+	if e != nil {
+		return e
+	}
+	defer stmt.Close()
+
+	//exec
+	for i := 0; i < sliceValue.Len(); i++ {
+		value := sliceValue.Index(i)
+		if value.Kind() == reflect.Ptr {
+			value = value.Elem()
+		}
+
+		//args
+		args := []interface{}{}
+		for _, j := range argsIndex {
+			args = append(args, value.Field(j).Interface())
+		}
+
+		_, e := stmt.Exec(args...)
+		if e != nil {
+			return fmt.Errorf("insert failed when insert %v:%w", value.Interface(), e)
+		}
+	}
+
+	return nil
 }

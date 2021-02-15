@@ -10,7 +10,7 @@ import (
 
 type Student struct {
 	Id   uint32         `db:"id"`
-	Name sql.NullString `db:"name"`
+	Name sql.NullString `db:"name" limit:"5"`
 }
 
 const (
@@ -27,11 +27,14 @@ func main() {
 		log.Fatal(e)
 	}
 
-	fmt.Println(m.TableName)
-	id, e := m.Insert(Student{
-		Name: sql.NullString{
-			String: "shit mother fucker",
-			Valid:  true,
+	fmt.Println(m.GetCreateTableSQL())
+
+	e = m.InsertAll([]Student{
+		{
+			Name: pgx.NullString("one"),
+		},
+		{
+			Name: pgx.NullString("two12345678"),
 		},
 	})
 	if e != nil {
@@ -39,5 +42,4 @@ func main() {
 		return
 	}
 
-	fmt.Println("id=", id.(uint32))
 }
