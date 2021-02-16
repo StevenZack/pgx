@@ -16,8 +16,9 @@ import (
 type BaseModel struct {
 	Type      reflect.Type
 	Dsn       string
-	Database  string
 	Pool      *sql.DB
+	Database  string
+	Schema    string
 	TableName string
 
 	dbTags  []string
@@ -41,6 +42,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		Dsn:       dsn,
 		Type:      t,
 		Database:  dsnMap["dbname"],
+		Schema:    "public",
 		TableName: ToTableName(t.Name()),
 	}
 
@@ -61,6 +63,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		return nil, false, errors.New("data must be struct type")
 	}
 
+	indexes := make(map[string]string)
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		if i == 0 {
@@ -84,6 +87,11 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 			return nil, false, errors.New("The first field's `db` tag must be id")
 		}
 
+		//index
+		if index, ok := field.Tag.Lookup("index"); ok {
+			indexes[dbTag] = index
+		}
+
 		//limit
 		limit := 0
 		if limitStr, ok := field.Tag.Lookup("limit"); ok {
@@ -104,7 +112,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	}
 
 	//desc
-	columns, e := DescTable(model.Pool, model.Database, "public", model.TableName)
+	columns, e := DescTable(model.Pool, model.Database, model.Schema, model.TableName)
 	if e != nil {
 		return nil, false, e
 	}
@@ -116,6 +124,12 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 			return nil, false, e
 		}
 		created = true
+		//create index
+		e = model.createIndexFromField(indexes)
+		if e != nil {
+			return nil, false, e
+		}
+
 	} else {
 		// remote column check
 		if len(model.dbTags) != len(columns) {
@@ -145,7 +159,7 @@ func (b *BaseModel) createTable() error {
 
 func (b *BaseModel) GetCreateTableSQL() string {
 	builder := new(strings.Builder)
-	builder.WriteString(`create table public.` + b.TableName + ` (`)
+	builder.WriteString(`create table ` + b.Schema + `.` + b.TableName + ` (`)
 	for i, dbTag := range b.dbTags {
 		builder.WriteString(dbTag + " ")
 		builder.WriteString(b.dbTypes[i])
@@ -163,7 +177,7 @@ func (b *BaseModel) GetCreateTableSQL() string {
 // GetInsertSQL returns insert SQL without returning id
 func (b *BaseModel) GetInsertSQL() ([]int, string) {
 	builder := new(strings.Builder)
-	builder.WriteString(`insert into public.` + b.TableName + ` (`)
+	builder.WriteString(`insert into ` + b.Schema + `.` + b.TableName + ` (`)
 
 	values := new(strings.Builder)
 	values.WriteString("values (")

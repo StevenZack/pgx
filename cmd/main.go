@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 
@@ -9,8 +8,9 @@ import (
 )
 
 type Student struct {
-	Id   uint32         `db:"id"`
-	Name sql.NullString `db:"name"`
+	Id        uint32 `db:"id"`
+	TagName   string `db:"name" index:"single=asc,unique=true,group=unique,lower=true"`
+	CommentId string `db:"comment_id" index:"group=unique"`
 }
 
 const (
