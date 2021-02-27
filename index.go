@@ -19,6 +19,12 @@ type (
 		key      string
 		sequence string
 	}
+	IndexSchema struct {
+		SchemaName string `db:"schemaname"`
+		TableName  string `db:"tablename"`
+		IndexName  string `db:"indexname"`
+		IndexDef   string `db:"indexdef"`
+	}
 )
 
 // createIndexFromField create index with format like: map[column_name]"single=asc,unique=true,lower=true,group=unique"
@@ -139,4 +145,33 @@ func (b *BaseModel) createIndexFromField(indexes map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (b *BaseModel) GetIndexes() ([]IndexSchema, error) {
+	rows, e := b.Pool.Query(`select schemaname,tablename,indexname,indexdef from pg_indexes where tablename=$1`, b.TableName)
+	if e != nil {
+		return nil, e
+	}
+
+	vs := []IndexSchema{}
+	for rows.Next() {
+		v := IndexSchema{}
+		e = rows.Scan(&v.SchemaName, &v.TableName, &v.IndexName, &v.IndexDef)
+		if e != nil {
+			break
+		}
+		vs = append(vs, v)
+	}
+	//check err
+	if closeErr := rows.Close(); closeErr != nil {
+		return nil, fmt.Errorf("rows.Close() err:%w", closeErr)
+	}
+	if e != nil {
+		return nil, e
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+
+	return vs, nil
 }
