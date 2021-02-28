@@ -342,6 +342,9 @@ func (b *BaseModel) Find(id interface{}) (interface{}, error) {
 	query = query + ` where ` + b.dbTags[0] + `=$1`
 	e := b.Pool.QueryRow(query, id).Scan(fieldArgs...)
 	if e != nil {
+		if e == sql.ErrNoRows {
+			return nil, e
+		}
 		return nil, fmt.Errorf("%w:%s", e, query)
 	}
 	return v.Interface(), nil
@@ -362,6 +365,9 @@ func (b *BaseModel) FindWhere(where string, args ...interface{}) (interface{}, e
 	}
 	e := b.Pool.QueryRow(query, args...).Scan(fieldArgs...)
 	if e != nil {
+		if e == sql.ErrNoRows {
+			return nil, e
+		}
 		return nil, fmt.Errorf("%w:%s", e, query)
 	}
 	return v.Interface(), nil
