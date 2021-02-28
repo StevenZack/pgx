@@ -50,10 +50,13 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 		if t.Elem().Kind() == reflect.String {
 			return "text[]", nil
 		}
+		if t.Elem().Kind() == reflect.Uint {
+			return "bigint[]", nil
+		}
 	case reflect.Struct:
 		switch t.String() {
 		case "time.Time":
-			return "timestamp with time zone not null default '0001-01-01 00:00:00", nil
+			return "timestamp with time zone not null default '0001-01-01 00:00:00'", nil
 		case "sql.NullString":
 			if limit > 0 {
 				return "varchar(" + strconv.Itoa(limit) + ")", nil

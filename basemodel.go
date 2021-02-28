@@ -35,6 +35,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	t := reflect.TypeOf(data)
 	dsnMap, e := ParseDsn(dsn)
 	if e != nil {
+		log.Println(e)
 		return nil, false, e
 	}
 
@@ -54,6 +55,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	//pool
 	model.Pool, e = sql.Open("postgres", dsn)
 	if e != nil {
+		log.Println(e)
 		log.Println(e)
 		return nil, false, e
 	}
@@ -97,6 +99,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		if limitStr, ok := field.Tag.Lookup("limit"); ok {
 			limit, e = strconv.Atoi(limitStr)
 			if e != nil {
+				log.Println(e)
 				return nil, false, errors.New("Invalid limit tag format:" + limitStr + " for field " + field.Name)
 			}
 		}
@@ -104,6 +107,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		//dbType
 		dbType, e := ToPostgreType(field.Type, dbTag, limit)
 		if e != nil {
+			log.Println(e)
 			return nil, false, fmt.Errorf("Field %s:%w", field.Name, e)
 		}
 
@@ -114,6 +118,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	//desc
 	columns, e := DescTable(model.Pool, model.Database, model.Schema, model.TableName)
 	if e != nil {
+		log.Println(e)
 		return nil, false, e
 	}
 
@@ -121,12 +126,14 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		//create table
 		e = model.createTable()
 		if e != nil {
+			log.Println(e)
 			return nil, false, e
 		}
 		created = true
 		//create index
 		e = model.createIndexFromField(indexes)
 		if e != nil {
+			log.Println(e)
 			return nil, false, e
 		}
 
@@ -153,8 +160,12 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 }
 
 func (b *BaseModel) createTable() error {
-	_, e := b.Pool.Exec(b.GetCreateTableSQL())
-	return e
+	query := b.GetCreateTableSQL()
+	_, e := b.Pool.Exec(query)
+	if e != nil {
+		return fmt.Errorf("%w: %s", e, query)
+	}
+	return nil
 }
 
 func (b *BaseModel) GetCreateTableSQL() string {
