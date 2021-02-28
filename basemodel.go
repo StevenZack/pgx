@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/StevenZack/tools/strToolkit"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
 
@@ -150,6 +151,9 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 
 			dbType := toPgPrimitiveType(model.dbTypes[i])
 			remoteType := strToolkit.SubBefore(column.DataType, " ", column.DataType)
+			if strings.HasSuffix(dbType, "[]") {
+				dbType = "ARRAY"
+			}
 			if dbType != remoteType {
 				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + "'s type '" + dbType + "' doesn't match remote type:" + remoteType)
 			}
@@ -260,7 +264,12 @@ func (b *BaseModel) Insert(v interface{}) (interface{}, error) {
 	argsIndex, query := b.GetInsertReturningSQL()
 	args := []interface{}{}
 	for _, i := range argsIndex {
-		args = append(args, value.Field(i).Interface())
+		field := value.Field(i)
+		if field.Kind() == reflect.Slice {
+			args = append(args, pq.Array(field.Interface()))
+			continue
+		}
+		args = append(args, field.Interface())
 	}
 
 	//exec
