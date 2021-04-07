@@ -23,7 +23,7 @@ type BaseModel struct {
 	TableName string
 
 	dbTags  []string
-	dbTypes []string
+	pgTypes []string
 }
 
 func NewBaseModel(dsn string, data interface{}) (*BaseModel, error) {
@@ -56,7 +56,6 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	//pool
 	model.Pool, e = sql.Open("postgres", dsn)
 	if e != nil {
-		log.Println(e)
 		log.Println(e)
 		return nil, false, e
 	}
@@ -105,15 +104,15 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 			}
 		}
 
-		//dbType
-		dbType, e := ToPostgreType(field.Type, dbTag, limit)
+		//pgType
+		pgType, e := ToPostgreType(field.Type, dbTag, limit)
 		if e != nil {
 			log.Println(e)
 			return nil, false, fmt.Errorf("Field %s:%w", field.Name, e)
 		}
 
 		model.dbTags = append(model.dbTags, dbTag)
-		model.dbTypes = append(model.dbTypes, dbType)
+		model.pgTypes = append(model.pgTypes, pgType)
 	}
 
 	//desc
@@ -149,7 +148,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + " name doesn't match remote column:" + column.ColumnName)
 			}
 
-			dbType := toPgPrimitiveType(model.dbTypes[i])
+			dbType := toPgPrimitiveType(model.pgTypes[i])
 			remoteType := strToolkit.SubBefore(column.DataType, " ", column.DataType)
 			if strings.HasSuffix(dbType, "[]") {
 				dbType = "ARRAY"
@@ -177,7 +176,7 @@ func (b *BaseModel) GetCreateTableSQL() string {
 	builder.WriteString(`create table ` + b.Schema + `.` + b.TableName + ` (`)
 	for i, dbTag := range b.dbTags {
 		builder.WriteString(dbTag + " ")
-		builder.WriteString(b.dbTypes[i])
+		builder.WriteString(b.pgTypes[i])
 		if i == 0 {
 			builder.WriteString(" primary key")
 		}
@@ -200,7 +199,7 @@ func (b *BaseModel) GetInsertSQL() ([]int, string) {
 	argsIndex := []int{}
 
 	for i, dbTag := range b.dbTags {
-		dbType := b.dbTypes[i]
+		dbType := b.pgTypes[i]
 		if strings.Contains(dbType, "serial") {
 			continue
 		}
@@ -386,7 +385,7 @@ func (b *BaseModel) QueryWhere(where string, args ...interface{}) (interface{}, 
 		return nil, fmt.Errorf("%w:%s", e, query)
 	}
 
-	vs := reflect.New(reflect.SliceOf(reflect.PtrTo(b.Type)))
+	vs := reflect.MakeSlice(reflect.SliceOf(reflect.PtrTo(b.Type)), 0, 2)
 	for rows.Next() {
 		v := reflect.New(b.Type)
 		fieldArgs := []interface{}{}
@@ -411,7 +410,7 @@ func (b *BaseModel) QueryWhere(where string, args ...interface{}) (interface{}, 
 		return nil, e
 	}
 
-	return vs.Elem().Interface(), nil
+	return vs.Interface(), nil
 }
 
 func (b *BaseModel) Exists(id interface{}) (bool, error) {

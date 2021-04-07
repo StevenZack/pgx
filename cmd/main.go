@@ -9,8 +9,7 @@ import (
 
 type Student struct {
 	Id        uint32 `db:"id"`
-	TagName   string `db:"name" index:"single=asc,unique=true,group=unique,lower=true"`
-	CommentId string `db:"comment_id" index:"group=unique"`
+	CommentId string `db:"comment_id" index:""`
 }
 
 const (
@@ -27,5 +26,12 @@ func main() {
 		log.Println(e)
 		return
 	}
-	fmt.Println(m.TableName)
+
+	vs, e := m.QueryWhere("")
+	if e != nil {
+		log.Println(e)
+		return
+	}
+
+	fmt.Println(vs)
 }
