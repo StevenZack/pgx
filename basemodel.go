@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/StevenZack/tools/strToolkit"
+	"github.com/iancoleman/strcase"
 	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
@@ -87,6 +88,9 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		}
 		if i == 0 && dbTag != "id" {
 			return nil, false, errors.New("The first field's `db` tag must be id")
+		}
+		if dbTag!=strcase.ToSnake(dbTag){
+			return nil,false,errors.New("Field '"+field.Name+"'s `db` tag is not in snake case")
 		}
 
 		//index
