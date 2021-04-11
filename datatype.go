@@ -44,14 +44,15 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 	case reflect.Bool:
 		return "boolean not null default false", nil
 	case reflect.Slice:
-		if t.Elem().Kind() == reflect.Uint8 {
+		switch t.Elem().Kind() {
+		case reflect.Uint8:
 			return "bytea", nil
-		}
-		if t.Elem().Kind() == reflect.String {
-			return "text[]", nil
-		}
-		if t.Elem().Kind() == reflect.Uint {
+		case reflect.Int32:
+			return "integer[]", nil
+		case reflect.Int, reflect.Int64:
 			return "bigint[]", nil
+		case reflect.String:
+			return "text[]", nil
 		}
 	case reflect.Struct:
 		switch t.String() {
@@ -74,7 +75,7 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 			return "timestamp with time zone", nil
 		}
 	}
-	return "", errors.New("unsupport field type:" + t.Name())
+	return "", errors.New("unsupport field type:" + t.String() + ",kind=" + t.Kind().String())
 }
 
 func toPgPrimitiveType(dbType string) string {
