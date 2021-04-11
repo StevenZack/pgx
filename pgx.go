@@ -9,8 +9,9 @@ import (
 
 func ToTableName(s string) string {
 	s = strcase.ToSnake(s)
-	if s == "user" {
-		return "users"
+	switch s {
+	case "user", "order":
+		return s + "s"
 	}
 	return s
 }

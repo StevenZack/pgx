@@ -42,7 +42,7 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 		}
 		return "text not null default ''", nil
 	case reflect.Bool:
-		return "bool not null default false", nil
+		return "boolean not null default false", nil
 	case reflect.Slice:
 		if t.Elem().Kind() == reflect.Uint8 {
 			return "bytea", nil
@@ -63,7 +63,7 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 			}
 			return "text", nil
 		case "sql.NullBool":
-			return "bool", nil
+			return "boolean", nil
 		case "sql.NullInt32":
 			return "integer", nil
 		case "sql.NullInt64":
