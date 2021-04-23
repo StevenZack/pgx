@@ -89,8 +89,8 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		if i == 0 && dbTag != "id" {
 			return nil, false, errors.New("The first field's `db` tag must be id")
 		}
-		if dbTag!=strcase.ToSnake(dbTag){
-			return nil,false,errors.New("Field '"+field.Name+"'s `db` tag is not in snake case")
+		if dbTag != strcase.ToSnake(dbTag) {
+			return nil, false, errors.New("Field '" + field.Name + "'s `db` tag is not in snake case")
 		}
 
 		//index
@@ -120,49 +120,78 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 	}
 
 	//desc
-	columns, e := DescTable(model.Pool, model.Database, model.Schema, model.TableName)
+	remoteColumnList, e := DescTable(model.Pool, model.Database, model.Schema, model.TableName)
 	if e != nil {
 		log.Println(e)
 		return nil, false, e
 	}
 
-	if len(columns) == 0 {
-		//create table
+	//create table
+	if len(remoteColumnList) == 0 {
 		e = model.createTable()
 		if e != nil {
 			log.Println(e)
 			return nil, false, e
 		}
-		created = true
 		//create index
 		e = model.createIndexFromField(indexes)
 		if e != nil {
 			log.Println(e)
 			return nil, false, e
 		}
+		return model, true, nil
+	}
 
-	} else {
-		// remote column check
-		if len(model.dbTags) != len(columns) {
-			return nil, false, errors.New("Inconsistent field number with remote columns: local=" + strconv.Itoa(len(model.dbTags)) + ", remote=" + strconv.Itoa(len(columns)))
+	// columns check
+	remoteColumns := make(map[string]Column)
+	for _, c := range remoteColumnList {
+		remoteColumns[c.ColumnName] = c
+	}
+
+	// local columns to be created
+	localColumns := make(map[string]string)
+	for i, db := range model.dbTags {
+		localColumns[db] = model.pgTypes[i]
+
+		remote, ok := remoteColumns[db]
+		if !ok {
+			//auto-create field on remote database
+			log.Println("Remote column '" + db + "' has been created")
+			e = model.addColumn(db, model.pgTypes[i])
+			if e != nil {
+				log.Println(e)
+				return nil, false, e
+			}
+			continue
 		}
-		for i, db := range model.dbTags {
-			column := columns[i]
-			if db != column.ColumnName {
-				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + " name doesn't match remote column:" + column.ColumnName)
-			}
 
-			dbType := toPgPrimitiveType(model.pgTypes[i])
-			remoteType := strToolkit.SubBefore(column.DataType, " ", column.DataType)
-			if strings.HasSuffix(dbType, "[]") {
-				dbType = "ARRAY"
-			}
-			if dbType != remoteType {
-				return nil, false, errors.New("Field[" + strconv.Itoa(i) + "] " + db + "'s type '" + dbType + "' doesn't match remote type:" + remoteType)
-			}
+		//type check
+		dbType := toPgPrimitiveType(model.pgTypes[i])
+		remoteType := strToolkit.SubBefore(remote.DataType, " ", remote.DataType)
+		if strings.HasSuffix(dbType, "[]") {
+			dbType = "ARRAY"
+		}
+		if dbType != remoteType {
+			return nil, false, errors.New("Found local field " + db + "'s type '" + dbType + "' doesn't match remote column type:" + remoteType)
 		}
 	}
 
+	//remote columns to be dropped
+	for _, remote := range remoteColumnList {
+		_, ok := localColumns[remote.ColumnName]
+		if !ok {
+			//auto-drop remote column
+			log.Println("Remote column '" + remote.ColumnName + "' has been dropped")
+			e = model.dropColumn(remote.ColumnName)
+			if e != nil {
+				log.Println(e)
+				return nil, false, e
+			}
+			continue
+		}
+	}
+
+	//TODO index check
 	return model, created, nil
 }
 
@@ -171,6 +200,24 @@ func (b *BaseModel) createTable() error {
 	_, e := b.Pool.Exec(query)
 	if e != nil {
 		return fmt.Errorf("%w: %s", e, query)
+	}
+	return nil
+}
+
+func (b *BaseModel) addColumn(name, typ string) error {
+	_, e := b.Pool.Exec(`alter table ` + b.Schema + `.` + b.TableName + ` add column ` + name + ` ` + typ)
+	if e != nil {
+		log.Println(e)
+		return e
+	}
+	return e
+}
+
+func (b *BaseModel) dropColumn(name string) error {
+	_, e := b.Pool.Exec(`alter table ` + b.Schema + `.` + b.TableName + ` drop column ` + name)
+	if e != nil {
+		log.Println(e)
+		return e
 	}
 	return nil
 }
