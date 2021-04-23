@@ -118,6 +118,11 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		model.dbTags = append(model.dbTags, dbTag)
 		model.pgTypes = append(model.pgTypes, pgType)
 	}
+	localIndexList, e := toIndexModels(indexes)
+	if e != nil {
+		log.Println(e)
+		return nil, false, e
+	}
 
 	//desc
 	remoteColumnList, e := DescTable(model.Pool, model.Database, model.Schema, model.TableName)
@@ -134,7 +139,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 			return nil, false, e
 		}
 		//create index
-		e = model.createIndexFromField(indexes)
+		e = model.createIndexFromField(localIndexList)
 		if e != nil {
 			log.Println(e)
 			return nil, false, e
@@ -156,7 +161,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		remote, ok := remoteColumns[db]
 		if !ok {
 			//auto-create field on remote database
-			log.Println("Remote column '" + db + "' has been created")
+			log.Println("Remote column '" + db + "' to be created")
 			e = model.addColumn(db, model.pgTypes[i])
 			if e != nil {
 				log.Println(e)
@@ -181,7 +186,7 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		_, ok := localColumns[remote.ColumnName]
 		if !ok {
 			//auto-drop remote column
-			log.Println("Remote column '" + remote.ColumnName + "' has been dropped")
+			log.Println("Remote column '" + remote.ColumnName + "' to be dropped")
 			e = model.dropColumn(remote.ColumnName)
 			if e != nil {
 				log.Println(e)
@@ -191,7 +196,56 @@ func NewBaseModelWithCreated(dsn string, data interface{}) (*BaseModel, bool, er
 		}
 	}
 
-	//TODO index check
+	// index check
+	remoteIndexList, e := model.GetIndexes()
+	if e != nil {
+		log.Println(e)
+		return nil, false, e
+	}
+	remoteIndexes := make(map[string]IndexSchema)
+	for _, remote := range remoteIndexList {
+		remoteIndexes[remote.IndexName] = remote
+	}
+
+	// indexes to be created
+	localIndexes := make(map[string]indexModel)
+	for _, local := range localIndexList {
+		localIndexes[local.ToIndexName(model.TableName)] = local
+		remote, ok := remoteIndexes[local.ToIndexName(model.TableName)]
+		if !ok {
+			//auto-create index on remote database
+			log.Println("Remote index '" + local.ToIndexName(model.TableName) + "' to be created")
+			e = model.createIndex(local)
+			if e != nil {
+				log.Println(e)
+				return nil, false, e
+			}
+			continue
+		}
+
+		//unique check
+		if local.unique != strings.Contains(remote.IndexDef, "UNIQUE") {
+			return nil, false, errors.New("Index '" + local.ToIndexName(model.TableName) + "' unique option is inconsistant with remote database: " + strconv.FormatBool(local.unique) + " vs " + strconv.FormatBool(strings.Contains(remote.IndexDef, "UNIQUE")))
+		}
+	}
+
+	//indexes to be dropped
+	for _, remote := range remoteIndexList {
+		if strings.Contains(remote.IndexName, "_pkey") {
+			continue
+		}
+		_, ok := localIndexes[remote.IndexName]
+		if !ok {
+			log.Println("Remote index '" + remote.IndexName + "' to be dropped")
+			e = model.dropIndex(remote.IndexName)
+			if e != nil {
+				log.Println(e)
+				return nil, false, e
+			}
+			continue
+		}
+	}
+
 	return model, created, nil
 }
 
