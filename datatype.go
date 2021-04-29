@@ -73,6 +73,14 @@ func ToPostgreType(t reflect.Type, dbTag string, limit int) (string, error) {
 			return "double precision", nil
 		case "sql.NullTime":
 			return "timestamp with time zone", nil
+		case "pq.Int64Array":
+			return "bigint[]", nil
+		case "pq.Int32Array":
+			return "integer[]", nil
+		case "pq.StringArray":
+			return "text[]", nil
+		case "pq.BoolArray":
+			return "boolean[]", nil
 		}
 	}
 	return "", errors.New("unsupport field type:" + t.String() + ",kind=" + t.Kind().String())
